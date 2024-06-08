@@ -9,6 +9,8 @@ import com.indigententerprises.domain.Node;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -25,6 +27,7 @@ public class TimedListComponent<T> implements TimedListService<T>, TimedListAdmi
     private final Condition waiting;
     private final Condition empty;
     private final LinkedList<Node<T>> linkedList;
+    private final ExecutorService executorService;
 
     // mutable state
     private final SleepRecorder sleepBegan;
@@ -37,6 +40,7 @@ public class TimedListComponent<T> implements TimedListService<T>, TimedListAdmi
         this.empty = lock.newCondition();
         this.linkedList = new LinkedList<>();
         this.sleepBegan = new SleepRecorder();
+        this.executorService = Executors.newSingleThreadExecutor();
     }
 
     public void init() {
@@ -192,7 +196,12 @@ public class TimedListComponent<T> implements TimedListService<T>, TimedListAdmi
                         long howLongInSleep = postSleepTimeInMilliseconds - sleepBegan;
 
                         if (howLongInSleep >= newNode.getTimeoutInMilliseconds()) {
-                            callback.timedOut(newNode.getT());
+                            final RunnableCallbackExecution<T> runnableCallbackExecution =
+                                    new RunnableCallbackExecution<>(
+                                            callback,
+                                            newNode.getT()
+                                    );
+                            executorService.submit(runnableCallbackExecution);
                             newListIterator.remove();
                         } else {
                             long howMuchSleepRemains = newNode.getTimeoutInMilliseconds() - howLongInSleep;
@@ -202,7 +211,8 @@ public class TimedListComponent<T> implements TimedListService<T>, TimedListAdmi
                 }
             }
         } catch (InterruptedException e) {
-            // do nothing; go down.
+            // go down
+            executorService.shutdown();
         } finally {
             lock.unlock();
         }
